@@ -5,7 +5,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
-import android.os.Environment;
 import android.util.Log;
 
 import com.pysun.library.util.ScreenUtils;
@@ -28,10 +27,9 @@ import rx.schedulers.Schedulers;
  */
 public class Millstone {
 
+    private static final String TAG = Millstone.class.getSimpleName();
     private String mSrcFilePath;
     private File mCompressedFile;
-    private File mCacheFileDir;
-    private Context mContext;
     private int mReqWidth;
     private int mReqHeight;
     private CompressListener mCompressListener;
@@ -41,7 +39,6 @@ public class Millstone {
     }
 
     public Millstone with(Context context) {
-        mContext = context;
         ScreenUtils.init(context);
         return getInstance();
     }
@@ -51,10 +48,6 @@ public class Millstone {
         return getInstance();
     }
 
-    public Millstone diskCache(File cacheFile) {
-        mCacheFileDir = cacheFile;
-        return getInstance();
-    }
 
     public Millstone setCompressListener(CompressListener compressListener) {
         this.mCompressListener = compressListener;
@@ -64,23 +57,19 @@ public class Millstone {
     public Millstone intoFile(File file) {
         mCompressedFile = file;
         return getInstance();
-
     }
 
     public void compress(int reqWidth, int reqHeight) {
-        mCompressedFile = null;
         mReqWidth = reqWidth;
         mReqHeight = reqHeight;
         if (0 == reqWidth * reqHeight || Math.min(reqHeight, reqWidth) < 0) {
             mReqWidth = ScreenUtils.getScreenWidth();
             mReqHeight = ScreenUtils.getScreenHeight();
-            Log.d("tag", "request width=" + mReqWidth + "request height=" + mReqHeight);
         }
         Observable.just(mSrcFilePath)
                 .doOnSubscribe(new Action0() {
                     @Override
                     public void call() {
-                        Log.d("tag", "doOnSubscribe " + Thread.currentThread().getName());
                         if (null != mCompressListener) {
                             mCompressListener.doStart();
                         }
@@ -90,14 +79,16 @@ public class Millstone {
                 .map(new Func1<String, Bitmap>() {
                     @Override
                     public Bitmap call(String s) {
-                        Log.d("tag", "map " + Thread.currentThread().getName());
-                        return decodeSampleBitmapFormFile(mSrcFilePath, mReqWidth, mReqHeight);
+                        Bitmap bitmap = decodeSampleBitmapFormFile(mSrcFilePath, mReqWidth, mReqHeight);
+                        if (null != mCompressedFile) {
+                            saveImage(mCompressedFile, bitmap, 1);
+                        }
+                        return bitmap;
                     }
                 })
                 .doOnError(new Action1<Throwable>() {
                     @Override
                     public void call(Throwable throwable) {
-                        Log.d("tag", "doOnError" + throwable.getMessage());
                         if (null != mCompressListener) {
                             mCompressListener.doError(throwable);
                         }
@@ -107,41 +98,23 @@ public class Millstone {
                 .subscribe(new Action1<Bitmap>() {
                     @Override
                     public void call(Bitmap bitmap) {
-                        Log.d("tag", Thread.currentThread().getName() + "result width=" + bitmap.getWidth() + "height=" + bitmap.getHeight() + "  " + bitmap.getByteCount());
                         if (null != mCompressListener) {
                             mCompressListener.doCompleted(bitmap);
                         }
-                        mCompressedFile = new File(getDiskCacheFileDirPath("image") + "/tempeee.jpg");
-                        if (null != mCompressedFile) {
-                            Log.d("tag", "result mCompressedFile=");
-                            saveImage(mCompressedFile, bitmap, 1);
-                        }
+
                     }
                 });
     }
 
     public void compress() {
         int bounds[] = decodeBounds(mSrcFilePath);
-        Log.d("tag", "bounds " + bounds[0] + " " + bounds[1]);
         int width = Math.min(bounds[0], bounds[1]);
         int height = Math.max(bounds[0], bounds[1]);
         int[] reqBounds = new int[2];
         if (0 != width * height) {
             reqBounds = buildDisplayResolution(width, height);
         }
-        Log.d("tag", "bounds " + reqBounds[0] + " " + reqBounds[1]);
         compress(reqBounds[0], reqBounds[1]);
-    }
-
-    private String getDiskCacheFileDirPath(String uniqueName) {
-        String state = Environment.getExternalStorageState();
-        final String cachePath = (Environment.MEDIA_MOUNTED.equals(state) || !Environment.isExternalStorageRemovable()) ? mContext.getExternalCacheDir().getPath() : mContext.getCacheDir().getPath();
-        Log.d("tag", cachePath);
-        File dir = new File(cachePath + File.separator + uniqueName);
-        if (!dir.exists()) {
-            dir.mkdir();
-        }
-        return dir.getPath();
     }
 
     private Bitmap decodeSampleBitmapFormFile(String filename, int reqWidth, int reqHeight) {
@@ -149,7 +122,6 @@ public class Millstone {
         File srcFile = new File(filename);
 
         if (!srcFile.exists() || !srcFile.isFile()) return null;
-        Log.d("tag", "srcFile length: " + srcFile.length() + "reqWidth" + reqWidth + "reqHeight" + reqHeight);
         final BitmapFactory.Options options = new BitmapFactory.Options();
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(filename, options);
@@ -165,7 +137,6 @@ public class Millstone {
             ExifInterface exifInterface = new ExifInterface(srcFile.getAbsolutePath());
             int orientation = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             float rotate = getImageRotate(orientation);
-            Log.d("tag", "rotate:" + rotate + "scale:" + scale + "  " + firstCompressBitmap.getByteCount());
             if (scale >= 1 && rotate == 0) {//图片已符合要求，不需要进一步处理
                 return firstCompressBitmap;
             } else {
@@ -202,7 +173,6 @@ public class Millstone {
         final int width = options.outWidth;
         int inSampleSize = 1;
 
-        Log.d("tag", "width=" + width + "height=" + height);
         if (height > reqHeight || width > reqWidth) {
 
             final int halfHeight = height / 2;
@@ -215,7 +185,6 @@ public class Millstone {
 
             long totalPixels = width * height / inSampleSize;
 
-            Log.d("tag", "inSample" + inSampleSize);
             if ((Math.max(width, height) / Math.min(width, height)) > 16 / 9) {
                 final long totalReqPixelsCap = reqWidth * reqHeight * 2;
                 while (totalPixels > totalReqPixelsCap) {
@@ -226,7 +195,6 @@ public class Millstone {
 
 
         }
-        Log.d("tag", "inSample " + inSampleSize);
         return inSampleSize;
     }
 
@@ -271,16 +239,15 @@ public class Millstone {
             if (null != file) {
                 BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(file));
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 60, bos);
-                Log.d("tag", "saveImage"+file.length());
                 bos.flush();
                 bos.close();
             }
         } catch (FileNotFoundException e) {
             e.printStackTrace();
-            Log.d("tag", "1  " + e.getMessage());
         } catch (IOException e) {
             e.printStackTrace();
-            Log.d("tag", e.getMessage());
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -291,12 +258,11 @@ public class Millstone {
     // Common display resolutions for wiki "screen resolution"
     private int[] buildDisplayResolution(int width, int height) {
         float ratio = (float) width / height;
-        Log.d("tag", "ratio " + ratio);
         int bounds[] = new int[2];// bounds[0]为宽   bounds[1]为高
         if (ratio >= 3.2f / 4) {                        //5:4 1280*1024
             bounds[0] = 1280;
             bounds[1] = 1280;
-            Log.d("tag", " 5:4 1280*1024 ");
+            Log.d(TAG, " 5:4 1280*1024 ");
         } else if (ratio >= 11.f / 16 && ratio < 3.2f / 4) {//4:3 1024*768 1280*920
             if (height > 1280) {
                 int remainder1280 = height % 1280;
@@ -312,7 +278,7 @@ public class Millstone {
                 bounds[0] = 1024;
                 bounds[1] = 1024;
             }
-            Log.d("tag", " 4:3 1024*768 1280*920 ");
+            Log.d(TAG, " 4:3 1024*768 1280*920 ");
         } else if (ratio >= 19.f / 32 && ratio < 11.f / 16) {// 16:10 1280*800 1440*900
             if (height > 1440) {
                 int remainder1440 = height % 1440;
@@ -328,7 +294,7 @@ public class Millstone {
                 bounds[0] = 1280;
                 bounds[1] = 1280;
             }
-            Log.d("tag", "16:10 1280*800 1440*900");
+            Log.d(TAG, "16:10 1280*800 1440*900");
         } else if (ratio >= 0.546 && ratio < 19.f / 32) {// 16:9 1920*1080 1280*720
             if (height > 1920) {
                 int remainder1920 = height % 1920;
@@ -346,11 +312,11 @@ public class Millstone {
             }
             bounds[0] = 1280;
             bounds[1] = 1280;
-            Log.d("tag", "  16:9 1920*1080 1280*720");
+            Log.d(TAG, "  16:9 1920*1080 1280*720");
         } else {
             bounds[0] = 0;
             bounds[1] = 0;
-            Log.d("tag", " 0*0");
+            Log.d(TAG, " 0*0");
         }
         return bounds;
 
