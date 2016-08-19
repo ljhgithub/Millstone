@@ -18,7 +18,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         final ImageView imageView = (ImageView) findViewById(R.id.imageview);
         File file = new File(StorageUtils.getDiskCacheFileDirPath(this, "image"), "temp.jpg");
-        Millstone.getInstance().with(this).load("/storage/emulated/0/DCIM/Camera/map.jpg").intoFile(file).setCompressListener(new Millstone.CompressListener() {
+        Millstone.getInstance().with(this).load("/storage/emulated/0/DCIM/Camera/wx.jpg").intoFile(file).setCompressListener(new Millstone.CompressListener() {
             @Override
             public void doStart() {
             }
